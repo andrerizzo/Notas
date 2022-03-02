@@ -1,0 +1,406 @@
+---
+title: "Análise da Base de Dados Notas"
+author: "André Rizzo"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r include=FALSE}
+# Load libraries
+library(readr)
+library(Hmisc) #For describe()
+library(pastecs) #For stat.desc()
+library(car) #For qqPlot
+library(PerformanceAnalytics)
+library(caret) #For BoxCoxTrans and filterVarImp
+library(e1071) #For BoxCoxTrans
+library(normtest) #For ad.test and others
+library(bestNormalize) #For OrderNorm and Yeo-Johnson transformations
+library(ggplot2)
+library(CORElearn) #For Relief
+library(randomForest)
+library(here)
+library(arrangements)
+library(formattable)
+```
+
+```{r include=FALSE}
+
+# Import dataset
+
+df = read_csv(here("data", "raw", "test_scores.csv"))
+```
+
+<br/>
+
+#### **Descrição das variáveis**
+
+-   [school]{.ul} ⟶ Name of the school the student is enrolled in.
+-   [school_setting]{.ul} ⟶ The location of the school.
+-   [school_type]{.ul} ⟶ The type of school. Either public or non-public
+-   [classroom]{.ul} ⟶ The type of classroom.
+-   [teaching_method]{.ul} ⟶ Teaching methods: Either experimental or Standard.
+-   [n_student]{.ul} ⟶ Number of students in the class.
+-   [student_id]{.ul} ⟶ A unique ID for each student.
+-   [gender]{.ul} ⟶ The gender of the students: male or female
+-   [lunch]{.ul} ⟶ Whether a student qualifies for free/subsidized lunch or not
+-   [pretest]{.ul} ⟶ The pretest score of the students out of 100
+-   [posttest]{.ul} ⟶ The posttest scores of the students out of 100
+
+<br/>
+
+#### **Exibir as primeiras 10 linhas do dataset**
+
+```{r echo=FALSE}
+
+head(df, n = 10)
+
+```
+
+<br/>
+
+#### **Exibir as últimas 10 linhas do dataset**
+
+```{r echo=FALSE}
+tail(df, n = 10)
+```
+
+<br/>
+
+#### **Criar base de treinamento e base de teste**
+
+```{r include=FALSE}
+index = createDataPartition(df$posttest, p = 0.70, list = FALSE)
+df_train = df[index, ]
+df_test = df[-index, ]
+
+# Criar uma cópia dos dataframes
+df_train_original = df_train
+df_test_original = df_test
+
+# Salvar as bases
+saveRDS(df_train_original, here("data", "raw", "train.rds"))
+saveRDS(df_train_original, here("data", "raw", "test.rds"))
+
+```
+
+Utilizou-se 70% dos dados para base de treinamento e 30% para teste
+
+<br/>
+
+#### **Verificar a estrutura do dataset**
+
+```{r echo=FALSE}
+# Verificar a estrutura do dataset
+str(df_train)
+```
+
+##### ***Análise***
+
+-   A base é composta por 11 variáveis.
+
+-   Cada variável possui 1495 observações.
+
+-   Entre as 11 variáveis temos:
+
+    -   8 qualitativas
+    -   3 quantitativas
+
+</br>
+
+#### **Análise numérica da base de treinamento**
+
+```{r echo=FALSE}
+describe(df_train, tabular = TRUE)
+```
+
+##### *Comentários*
+
+Uma análise preliminar indica que a variável student_id não trás nenhum tipo de informação significativa, além disso possui alta cardinalidade.
+Desta forma, optou-se pela remoção da variável de modo a não trazer prejuízos para o modelo.
+
+<br/>
+
+#### **Removendo a variável student_id**
+
+```{r echo=FALSE}
+df_train = df_train[, -which(names(df_train) == "student_id")]
+head(df_train, n = 10)
+
+```
+
+<br/>
+
+#### **Organizando as variáveis**
+
+```{r echo=FALSE}
+
+# Separando as variáveis quantitativas das variáveis qualitativas
+
+var_class = lapply(df_train,class)
+
+vars_categoricas = NULL
+vars_numericas = NULL
+vars_todas = NULL
+
+for (a in 1:length(var_class)){
+  if (var_class[a] == "character"){
+    vars_categoricas = c(vars_categoricas, names(var_class[a]))
+  } else if (var_class[a] == "numeric"){
+    vars_numericas = c(vars_numericas, names(var_class[a]))  
+    } 
+}
+
+print("Variáveis quantitativas:")
+formattable(as.data.frame(vars_numericas))
+
+print("Variáveis qualitativas:")
+formattable(as.data.frame(vars_categoricas))
+
+
+```
+
+</br>
+
+#### **Análise gráfica das variáveis qualitativas**
+
+```{r echo=FALSE}
+# Estudo gráfico das variáveis nominais
+
+for (a in vars_categoricas){
+  print(ggplot(df_train, aes_string(a)) +
+  geom_bar(fill = "red") +
+  ggtitle(paste("Variable",a)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+  
+  cat("\n")
+}
+
+```
+
+</br>
+
+#### **Análise gráfica das variáveis quantitativas**
+
+```{r echo=FALSE}
+# Estudo gráfico das variáveis quantitativas
+
+for (a in vars_numericas){
+  print(ggplot(df_train, aes_string(a)) +
+  geom_histogram(fill = "red", bins = 25) +
+  ggtitle(paste("Histogram - Variable",a)) +
+  scale_x_discrete() +
+  theme(plot.title = element_text(hjust = 0.5)))
+
+  print(ggplot(df_train, aes_string(a)) +
+  geom_density(fill = "lightyellow") +
+  ggtitle(paste("Density Plot - Variable",a)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+
+  print(ggplot(df_train, aes_string(a)) +
+  geom_boxplot(fill = "lightblue") +
+  ggtitle(paste("Boxplot - Variable",a)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+  
+  cat("\n")
+}
+
+
+```
+
+##### *Comentários*
+
+-   Não há valores faltantes (missing values) em nenhuma das variáveis observadas.\
+    <br/>
+
+-   [Variável *school*]{.ul}
+
+    -   Informa o nome da escola que o aluno estuda.
+
+    -   Variável qualitativa.
+
+    -   Existem 23 escolas na amostra.
+
+    -   Possui 23 valores distintos de um total de 1495, ou seja, 1,5%.
+        A variável deve ser mantida pois não há a priori problemas relativos à alta cardinalidade.
+
+        <br/>
+
+-   [Variável *school_setting*]{.ul}
+
+    -   Informa em qual área a escola está localizada (urbana, suburbana ou rural).
+
+    -   Variável qualitativa.
+
+    -   A maioria dos alunos da amostra estuda em escolas na área urbana (43%), a seguir vemos que 33% dos estudantes frequentam escolas na área suburbanas e 23,7% frequentam escolas na área rural.
+
+        <br/>
+
+-   [Variável *school_type*]{.ul}
+
+    -   Informa se o aluno estuda em uma escola pública ou privada.
+
+    -   Variável qualitativa.
+
+    -   A maioria dos alunos da amostra estuda em escolas públicas (74,6%).
+        Apenas 25,4% dos estudantes frequentam escolas particulares.
+
+        <br/>
+
+-   [Variável *classroom*]{.ul}
+
+    -   Indica a qual turma o aluno pertence.
+
+    -   Variável qualitativa.
+
+    -   Existem 97 turmas diferentes na amostra.
+
+    -   Possui 97 valores distintos de um total de 1495, ou seja, 6,5%.
+        A variável deve ser mantida pois não há a priori problemas relativos à alta cardinalidade.\
+        <br/>
+
+-   [Variável *teaching_method*]{.ul}
+
+    -   Indica o método de ensino utilizado pela escola (experimental ou standard).
+
+    -   Variável qualitativa.
+
+    -   65,5% dos alunos estudam em escolas que utilizam metodologia tradicional, enquanto 34,5% estudam em escolas com metodologias de ensino experimentais.
+
+        <br/>
+
+-   [Variável *n_student*]{.ul}
+
+    -   Indica o número de alunos que foram avaliados em um daterminada escola.
+
+    -   Variável quantitativa discreta.
+
+    -   Observa-se que em média foram avaliados 22 alunos por escola.
+
+    -   Verifica-se que o menos número de alunos avaliados em uma escola foi 14, já o maior número de alunos avaliados em uma escola foram 31.
+
+<br/>
+
+#### Criação das combinações 2 a 2
+
+```{r echo=FALSE}
+
+# Variáveis quantitativas
+comb_vars_num = as.data.frame(combinations(x = vars_numericas, k = 2, replace = FALSE))
+
+# Variáveis qualitativas
+comb_vars_cat = as.data.frame(combinations(x = vars_categoricas, k = 2, replace = FALSE))
+
+comb_vars_cat_num = data.frame()
+
+# Variáveis qualitativas e quantitativas
+i = 1
+for (num in vars_numericas){
+  for (cat in vars_categoricas){
+    comb_vars_cat_num[i,1] = num
+    comb_vars_cat_num[i,2] = cat
+    i = i+1
+  }
+}
+
+cat("Variáveis qualitativas", "\n")
+formattable(comb_vars_cat)
+
+cat("Variáveis quantitativas", "\n")
+formattable(comb_vars_num)
+
+cat("Variáveis qualitativas e quantitativas", "\n")
+formattable(comb_vars_cat_num)
+
+```
+
+<br/>
+
+#### **Estudo gráfico da relação entre as variáveis quantitativas**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Estudo gráfico da relação entre as variáveis quantitativas
+
+for (aux in 1:dim(comb_vars_num)[1]){
+  a = comb_vars_num[aux,1]
+  b = comb_vars_num[aux,2]
+  print(ggplot(df_train, aes_string(a, b)) +
+  geom_point(colour = "green") +
+  geom_smooth() +
+  ggtitle(paste("Scatterplot - Variables",a,"and",b)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+  cat("\n")
+}
+```
+
+<br/>
+
+#### **Estudo gráfico da relação entre as variáveis nominais**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Estudo gráfico da relação entre as variáveis nominais
+
+for (aux in 1:dim(comb_vars_cat)[1]){
+  a = comb_vars_cat[aux,1]
+  b = comb_vars_cat[aux,2]
+  print(ggplot(df_train, aes_string(a, b)) +
+  geom_count()+
+  ggtitle(paste("Plot - Variables",a,"and",b)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+  cat("\n")
+}
+
+```
+
+<br/>
+
+#### **Estudo gráfico da relação entre as variáveis qualitativas e quantitativas**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Estudo gráfico da relação entre as variáveis nominais
+
+for (aux in 1:dim(comb_vars_cat_num)[1]){
+  a = comb_vars_cat_num[aux,1]
+  b = comb_vars_cat_num[aux,2]
+  print(ggplot(df_train, aes_string(a, b)) +
+  geom_boxplot(fill = "lightblue") +
+  ggtitle(paste("BoxPlot - Variables",a,"and",b)) +
+  theme(plot.title = element_text(hjust = 0.5)))
+}
+
+```
+
+Uma escola específica apresenta desempenho superior a outra ?\
+A zona que a escola está localizada influencia no resultado (rural, urbana e suburbana) ?
+\
+Escolas públicas possuem desempenho diferente das escolas particulares
+?\
+Meninos e meninas possuem desempenho diferente
+?\
+A metodologia de ensino influencia no desempenho do alun
+o ?\
+Um aluno que recebe alimentação tem desempenho diferente de um que não rece
+be ?\
+Os alunos tendem a manter o mesmo desempenho nos pre-teste e no pós-te
+ste ?
+
+
+```{r eval=FALSE, include=FALSE}
+
+teste = df_train %>%
+  select(school, student_id) %>%
+  distinct()
+
+df_train %>%
+  filter()
+  
+
+
+```
+
+
+23 escolas
